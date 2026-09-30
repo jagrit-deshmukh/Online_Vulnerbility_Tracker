@@ -30,4 +30,27 @@ public final class UserDao {
         LocalDateTime created=rs.getTimestamp("created_at").toLocalDateTime();
         return switch(rs.getString("role")) { case "ADMIN" -> new Admin(id,u,n,h,created); case "ANALYST" -> new Analyst(id,u,n,h,created); case "ENGINEER" -> new Engineer(id,u,n,h,created); default -> throw new SQLException("Unknown role"); };
     }
+
+    public int create(Connection connection, String username, String fullName,
+                  String password, String role) throws SQLException {
+    String sql = "INSERT INTO users(username,password_hash,full_name,role) VALUES(?,?,?,?)";
+
+    try (PreparedStatement ps = connection.prepareStatement(
+            sql, Statement.RETURN_GENERATED_KEYS)) {
+
+        ps.setString(1, username);
+        ps.setString(2, PasswordUtil.hash(password));
+        ps.setString(3, fullName);
+        ps.setString(4, role);
+
+        ps.executeUpdate();
+
+        try (ResultSet rs = ps.getGeneratedKeys()) {
+            if (!rs.next()) {
+                throw new SQLException("No generated user id");
+            }
+            return rs.getInt(1);
+        }
+    }
+}
 }

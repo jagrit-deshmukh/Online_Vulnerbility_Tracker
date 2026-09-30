@@ -23,6 +23,8 @@ public final class WebApp {
     private static final VulnerabilityService VULNS = new VulnerabilityService();
     private static final TicketService TICKETS = new TicketService();
     private static final CommentDao COMMENTS = new CommentDao();
+    private static final UserDao USERS = new UserDao();
+    private static final AuditLogDao AUDIT = new AuditLogDao();
 
     private WebApp() {}
 
@@ -47,6 +49,7 @@ public final class WebApp {
             if ("GET".equals(method) && "/dashboard".equals(path)) { send(ex, 200, dashboard(user)); return; }
             if ("GET".equals(method) && "/ticket".equals(path)) { send(ex, 200, ticketPage(ex, user)); return; }
             if ("GET".equals(method) && "/admin/users".equals(path)) { requireRole(user, "ADMIN"); send(ex, 200, page("User management", user, userManagement(user))); return; }
+            if ("POST".equals(method) && "/admin/users".equals(path)) {adminCreateUser(ex, user);return; }
             if ("POST".equals(method) && "/analyst/report".equals(path)) { analystReport(ex, user); return; }
             if ("POST".equals(method) && "/admin/assign".equals(path)) { adminAssign(ex, user); return; }
             if ("POST".equals(method) && "/engineer/status".equals(path)) { engineerStatus(ex, user); return; }
@@ -54,8 +57,28 @@ public final class WebApp {
             send(ex, 404, page("Not found", user, "<div class='card'><h2>404</h2><p>Page not found.</p></div>"));
         } catch (SecurityException e) { send(ex, 403, page("Forbidden", currentUser(ex), alert(e.getMessage(), "danger"))); }
         catch (IllegalArgumentException e) { send(ex, 400, page("Invalid request", currentUser(ex), alert(e.getMessage(), "danger"))); }
-        catch (SQLException e) { send(ex, 500, page("Database error", currentUser(ex), alert("Database operation failed. Check the server configuration and database availability.", "danger"))); }
-        catch (Exception e) { e.printStackTrace(); send(ex, 500, page("Server error", currentUser(ex), alert("Unexpected server error.", "danger"))); }
+        catch (SQLException e) {
+    e.printStackTrace();
+    User user = currentUser(ex);
+
+    if (user == null) {
+        send(ex, 500, loginPage("Database operation failed. Check the server configuration and database availability."));
+    } else {
+        send(ex, 500, page("Database error", user,
+                alert("Database operation failed. Check the server configuration and database availability.", "danger")));
+    }
+}
+catch (Exception e) {
+    e.printStackTrace();
+    User user = currentUser(ex);
+
+    if (user == null) {
+        send(ex, 500, loginPage("Unexpected server error."));
+    } else {
+        send(ex, 500, page("Server error", user,
+                alert("Unexpected server error.", "danger")));
+    }
+}
     }
 
     private static void login(HttpExchange ex) throws Exception {
@@ -169,7 +192,13 @@ public final class WebApp {
 
     private static String engineerDashboard(User user) throws SQLException {
         String csrf=csrfFor(user);
-        List<Map<String,Object>> tickets = query("SELECT t.ticket_id,v.title,v.description,v.severity,t.status,t.due_date,t.created_at FROM ticket t JOIN vulnerability v ON v.vuln_id=t.vuln_id WHERE t.assigned_to=? ORDER BY t.due_date ASC", user.getUserId());
+       List<Map<String,Object>> tickets = query(
+    "SELECT t.ticket_id,v.title,v.description,v.severity,t.status,t.due_date,t.created_at " +
+    "FROM ticket t JOIN vulnerability v ON v.vuln_id=t.vuln_id " +
+    "WHERE t.assigned_to=? AND t.status <> 'CLOSED' " +
+    "ORDER BY t.due_date ASC",
+    user.getUserId()
+);
         StringBuilder b = new StringBuilder();
         b.append("<section class='card'><div class='section-head'><h2>Assigned tickets</h2><span class='muted'>").append(tickets.size()).append(" tickets</span></div><div class='ticket-list'>");
        for (Map<String,Object> t : tickets) {
@@ -241,7 +270,7 @@ public final class WebApp {
         Map<String,Object> t = rows.get(0);
         boolean allowed = "ADMIN".equals(user.getRole()) || Objects.equals(((Number)t.get("reported_by")).intValue(), user.getUserId()) || (t.get("assigned_to") != null && Objects.equals(((Number)t.get("assigned_to")).intValue(), user.getUserId()));
         if (!allowed) throw new SecurityException("You are not allowed to view this ticket");
-        List<Map<String,Object>> comments = query("SELECT c.created_at,c.comment_text,u.full_name FROM comment c JOIN users u ON u.user_id=c.user_id WHERE c.ticket_id=? ORDER BY c.created_at ASC", ticketId);
+       List<Map<String,Object>> comments = query("SELECT c.created_at,c.text AS comment_text,u.full_name FROM comment c JOIN users u ON u.user_id=c.user_id WHERE c.ticket_id=? ORDER BY c.created_at ASC", ticketId);
         StringBuilder b = new StringBuilder();
         b.append("<a class='back-link' href='/dashboard'>← Back to dashboard</a>");
         b.append("<section class='card ticket-detail'><div class='ticket-top'><div><span class='eyebrow'>Ticket #").append(ticketId).append("</span><h2>").append(e(t.get("title"))).append("</h2></div><div>").append(badge(t.get("severity"))).append(" ").append(statusBadge(t.get("status"))).append("</div></div>");
@@ -257,15 +286,153 @@ public final class WebApp {
         return page("Ticket #" + ticketId, user, b.toString());
     }
 
-    private static String userManagement(User user) throws SQLException {
-        List<Map<String,Object>> users = query("SELECT user_id,username,full_name,role,created_at FROM users ORDER BY role,full_name");
-        String csrf = csrfFor(user);
-        StringBuilder b = new StringBuilder();
-        b.append("<div class='grid two'><section class='card'><div class='section-head'><h2>Users</h2><span class='muted'>Accounts</span></div><div class='table-wrap'><table><tr><th>Name</th><th>Username</th><th>Role</th><th>Created</th></tr>");
-        for (Map<String,Object> u : users) b.append("<tr><td>").append(e(u.get("full_name"))).append("</td><td>").append(e(u.get("username"))).append("</td><td>").append(e(u.get("role"))).append("</td><td>").append(e(u.get("created_at"))).append("</td></tr>");
-        b.append("</table></div></section><section class='card'><h2>Account administration</h2><p class='muted'>User creation remains available through the database seed/admin workflow in this milestone. This page is intentionally read-only until password lifecycle controls are added.</p></section></div>");
-        return b.toString();
+    private static void adminCreateUser(HttpExchange ex, User user) throws Exception {
+    requireRole(user, "ADMIN");
+
+    Map<String, String> f = form(ex);
+    verifyCsrf(ex, f);
+
+    String fullName = required(f, "fullName", 100);
+    String username = required(f, "username", 50);
+    String password = required(f, "password", 128);
+    String confirmPassword = required(f, "confirmPassword", 128);
+    String role = required(f, "role", 20).toUpperCase(Locale.ROOT);
+
+    if (!password.equals(confirmPassword)) {
+        throw new IllegalArgumentException("Passwords do not match.");
     }
+
+    if (!Set.of("ADMIN", "ANALYST", "ENGINEER").contains(role)) {
+        throw new IllegalArgumentException("Invalid user role.");
+    }
+
+    if (password.length() < 8) {
+        throw new IllegalArgumentException("Password must be at least 8 characters.");
+    }
+
+    try (Connection c = DBConnection.getInstance().getConnection()) {
+        c.setAutoCommit(false);
+
+        try {
+            int userId = USERS.create(c, username, fullName, password, role);
+
+            AUDIT.record(
+                    c,
+                    user.getUserId(),
+                    "USER_CREATED",
+                    "Created user #" + userId +
+                            " (" + username + ") with role " + role
+            );
+
+            c.commit();
+
+            redirectWithMessage(
+                    ex,
+                    "/admin/users",
+                    "User " + username + " was created successfully."
+            );
+        } catch (Exception e) {
+            c.rollback();
+
+            if (e instanceof SQLException sqlException
+                    && "23000".equals(sqlException.getSQLState())) {
+                throw new IllegalArgumentException(
+                        "Username already exists."
+                );
+            }
+
+            throw e;
+        }
+    }
+}
+
+    private static String userManagement(User user) throws SQLException {
+    List<Map<String, Object>> users = query(
+            "SELECT user_id,username,full_name,role,created_at " +
+            "FROM users ORDER BY role,full_name"
+    );
+
+    String csrf = csrfFor(user);
+
+    StringBuilder b = new StringBuilder();
+
+    b.append("<div class='grid two'>");
+
+    // User list
+    b.append("<section class='card'>")
+            .append("<div class='section-head'>")
+            .append("<h2>Users</h2>")
+            .append("<span class='muted'>")
+            .append(users.size())
+            .append(" accounts</span>")
+            .append("</div>");
+
+    b.append("<div class='table-wrap'><table>")
+            .append("<tr>")
+            .append("<th>Name</th>")
+            .append("<th>Username</th>")
+            .append("<th>Role</th>")
+            .append("<th>Created</th>")
+            .append("</tr>");
+
+    for (Map<String, Object> u : users) {
+        b.append("<tr>")
+                .append("<td>").append(e(u.get("full_name"))).append("</td>")
+                .append("<td>").append(e(u.get("username"))).append("</td>")
+                .append("<td>").append(e(u.get("role"))).append("</td>")
+                .append("<td>").append(e(u.get("created_at"))).append("</td>")
+                .append("</tr>");
+    }
+
+    b.append("</table></div>")
+            .append("</section>");
+
+    // Create user
+    b.append("<section class='card'>")
+            .append("<div class='section-head'>")
+            .append("<h2>Create user</h2>")
+            .append("<span class='muted'>Admin only</span>")
+            .append("</div>")
+
+            .append("<form method='post' action='/admin/users'>")
+
+            .append("<input type='hidden' name='csrf' value='")
+            .append(csrf)
+            .append("'>")
+
+            .append("<label>Full name")
+            .append("<input name='fullName' maxlength='100' required>")
+            .append("</label>")
+
+            .append("<label>Username")
+            .append("<input name='username' maxlength='50' autocomplete='username' required>")
+            .append("</label>")
+
+            .append("<label>Password")
+            .append("<input type='password' name='password' maxlength='128' minlength='8' autocomplete='new-password' required>")
+            .append("</label>")
+
+            .append("<label>Confirm password")
+            .append("<input type='password' name='confirmPassword' maxlength='128' minlength='8' autocomplete='new-password' required>")
+            .append("</label>")
+
+            .append("<label>Role")
+            .append("<select name='role' required>")
+            .append("<option value='ANALYST'>ANALYST</option>")
+            .append("<option value='ENGINEER'>ENGINEER</option>")
+            .append("<option value='ADMIN'>ADMIN</option>")
+            .append("</select>")
+            .append("</label>")
+
+            .append("<button class='btn' type='submit'>Create user</button>")
+
+            .append("</form>")
+            .append("</section>");
+
+    b.append("</div>");
+
+    return b.toString();
+}
 
     private static Map<String,String> queryParams(HttpExchange ex) {
         return parseEncodedForm(ex.getRequestURI().getRawQuery() == null ? "" : ex.getRequestURI().getRawQuery());
