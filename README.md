@@ -109,6 +109,10 @@ The integration check has been verified successfully against the local MySQL dev
 
 The project includes a browser-based UI built on Java 17's lightweight HTTP server, so no frontend framework or application server is required for the academic project. The console UI remains available.
 
+### Login
+
+![VulnTracker Login](docs/login.png)
+
 Start the web application after building with Maven:
 
 ```bash
