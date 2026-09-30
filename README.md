@@ -17,6 +17,40 @@ Role-based security vulnerability management and remediation workflow system for
 5. Engineer changes ticket status and adds comments.
 6. User actions are written to `audit_log`.
 
+## Architecture
+
+```text
+Browser / Console
+       |
+       v
++----------------------+
+| Java Web UI / CLI    |
++----------------------+
+       |
+       v
++----------------------+
+| Service Layer         |
+| - Authentication      |
+| - Ticket Workflow     |
+| - SLA Management      |
+| - Comments / Audit    |
++----------------------+
+       |
+       v
++----------------------+
+| JDBC / DAO Layer      |
++----------------------+
+       |
+       v
++----------------------+
+| MySQL Database        |
+| - users               |
+| - vulnerability       |
+| - ticket              |
+| - comment             |
+| - audit_log           |
++----------------------+
+
 ## SLA
 | Severity | SLA |
 |---|---:|
