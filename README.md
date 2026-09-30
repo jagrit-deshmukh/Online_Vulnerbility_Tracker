@@ -113,6 +113,20 @@ The project includes a browser-based UI built on Java 17's lightweight HTTP serv
 
 ![VulnTracker Login](docs/login.png)
 
+### Role-based dashboards
+
+#### Admin
+
+![Admin Dashboard](docs/admin-dashboard.png)
+
+#### Analyst
+
+![Analyst Dashboard](docs/analyst-dashboard.png)
+
+#### Engineer
+
+![Engineer Dashboard](docs/engineer-dashboard.png)
+
 Start the web application after building with Maven:
 
 ```bash
