@@ -69,7 +69,7 @@ mvn test
 # or run DatabaseIntegrationCheck explicitly from your IDE
 ```
 
-The integration check has intentionally not been marked as passing in this environment because a MySQL server and Maven/Connector-J runtime were not available here.
+The integration check has been verified successfully against the local MySQL development database. It covers authentication, vulnerability-to-ticket creation, Critical SLA calculation, admin assignment, engineer status updates, comments, and audit logging, followed by test-data cleanup.
 
 ## Web UI
 
